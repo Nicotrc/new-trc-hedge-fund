@@ -16,8 +16,12 @@ app = Celery(
         "app.tasks.ingest_fundamentals",
         "app.tasks.ingest_insider",
         "app.tasks.ingest_news",
+        "app.tasks.ingest_macro",
+        "app.tasks.ingest_options",
+        "app.tasks.ingest_events",
         "app.tasks.scan_market",
         "app.tasks.analyse_opportunity",
+        "app.tasks.monitor_positions",
     ],
 )
 
@@ -30,25 +34,45 @@ app.conf.update(
     task_acks_late=True,
     worker_prefetch_multiplier=1,
     beat_schedule={
+        # --- Data ingestion (L1) ---
         "ingest-price": {
             "task": "app.tasks.ingest_price.run",
-            "schedule": 300,  # every 5 minutes
+            "schedule": 900,  # every 15 minutes (was 5m, relaxed to reduce load)
         },
         "ingest-fundamentals": {
             "task": "app.tasks.ingest_fundamentals.run",
-            "schedule": crontab(hour=6, minute=0),  # daily at 06:00 UTC
+            "schedule": crontab(hour=6, minute=0),
         },
         "ingest-insider": {
             "task": "app.tasks.ingest_insider.run",
-            "schedule": crontab(hour=7, minute=0),  # daily at 07:00 UTC
+            "schedule": crontab(hour=18, minute=0),  # post-market
         },
         "ingest-news": {
             "task": "app.tasks.ingest_news.run",
-            "schedule": 900,  # every 15 minutes
+            "schedule": 1800,  # every 30 minutes
         },
+        # --- New V2 data sources ---
+        "ingest-macro": {
+            "task": "app.tasks.ingest_macro.run",
+            "schedule": 21600,  # every 6 hours
+        },
+        "ingest-options": {
+            "task": "app.tasks.ingest_options.run",
+            "schedule": 3600,  # every 1 hour
+        },
+        "ingest-events": {
+            "task": "app.tasks.ingest_events.run",
+            "schedule": crontab(hour=7, minute=0),  # daily pre-market
+        },
+        # --- Signal scanning (L2) ---
         "scan-market": {
             "task": "app.tasks.scan_market.run",
-            "schedule": SCAN_INTERVAL,  # default 900s, configurable via SCAN_INTERVAL_SECONDS
+            "schedule": SCAN_INTERVAL,
+        },
+        # --- Position monitoring (L6) ---
+        "monitor-positions": {
+            "task": "app.tasks.monitor_positions.run",
+            "schedule": 300,  # every 5 minutes during market hours
         },
     },
 )

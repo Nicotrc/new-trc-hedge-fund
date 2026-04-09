@@ -16,3 +16,6 @@ tenacity
 python-dotenv
 psycopg2-binary
 yfinance
+numpy>=1.26.0
+pytz
+nest-asyncio

@@ -10,6 +10,11 @@ class Base(DeclarativeBase):
     pass
 
 
+# ===========================================================================
+# V1 tables (existing — kept unchanged)
+# ===========================================================================
+
+
 class PriceOHLCV(Base):
     """OHLCV price data — TimescaleDB hypertable on timestamp."""
 
@@ -115,10 +120,10 @@ class DetectedSignal(Base):
 
 
 class AgentVerdictRecord(Base):
-    """Per-persona agent verdict — TimescaleDB hypertable on analysed_at.
+    """Per-agent verdict — TimescaleDB hypertable on analysed_at.
 
-    Composite primary key: (analysed_at, opportunity_id, persona) ensures
-    idempotent upserts and efficient time-range queries per opportunity.
+    V2: supports both V1 persona names and V2 quant agent IDs via the
+    `agent_version` column ("v1" | "v2").
     """
 
     __tablename__ = "agent_verdicts"
@@ -139,8 +144,8 @@ class AgentVerdictRecord(Base):
 class CIODecisionRecord(Base):
     """CIO-level investment decision — TimescaleDB hypertable on decided_at.
 
-    Composite primary key: (decided_at, opportunity_id) maps one decision
-    per opportunity per timestamp. Used by Phase 4 portfolio manager.
+    V2: decision_json may contain a CIODecisionV2 payload (with MC results,
+    Kelly sizing, scenarios) when agent_version='v2'.
     """
 
     __tablename__ = "cio_decisions"
@@ -156,3 +161,84 @@ class CIODecisionRecord(Base):
     suggested_allocation_pct: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
     final_verdict: Mapped[str] = mapped_column(String(10), nullable=False)
     decision_json: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# ===========================================================================
+# V2 tables (new — migration 0004)
+# ===========================================================================
+
+
+class MacroIndicator(Base):
+    """Macro market indicators — TimescaleDB hypertable on timestamp.
+
+    Indicators: VIX, DXY, US10Y, US2Y, FEDFUNDS, credit_spread.
+    """
+
+    __tablename__ = "macro_indicators"
+    __table_args__ = {
+        "timescaledb_hypertable": {"time_column_name": "timestamp"},
+    }
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    indicator: Mapped[str] = mapped_column(String(30), primary_key=True)
+    value: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    change_1d: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    change_5d: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class OptionsFlow(Base):
+    """Options flow data — TimescaleDB hypertable on timestamp."""
+
+    __tablename__ = "options_flow"
+    __table_args__ = {
+        "timescaledb_hypertable": {"time_column_name": "timestamp"},
+    }
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    call_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    put_volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    put_call_ratio: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    unusual_activity_score: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    iv_rank: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    largest_trade_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class EventCalendar(Base):
+    """Upcoming event calendar — standard table (not hypertable)."""
+
+    __tablename__ = "event_calendar"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ticker: Mapped[str] = mapped_column(String(20), nullable=False)
+    event_type: Mapped[str] = mapped_column(String(30), nullable=False)
+    event_date: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    impact_estimate: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    binary_outcome: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+
+class ShortInterest(Base):
+    """Short interest data — TimescaleDB hypertable on timestamp."""
+
+    __tablename__ = "short_interest"
+    __table_args__ = {
+        "timescaledb_hypertable": {"time_column_name": "timestamp"},
+    }
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), primary_key=True
+    )
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    si_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    days_to_cover: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    borrow_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    shares_short: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)

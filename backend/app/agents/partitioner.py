@@ -1,8 +1,23 @@
-"""Data partitioner: enforces information asymmetry across investor personas.
+"""Data partitioner: enforces information asymmetry across quant agents.
 
-Each persona is deliberately restricted to a subset of available data types.
-This prevents sycophantic consensus — agents cannot converge to the same
-conclusion if they cannot see the same signals.
+V2: Extended to 8 data categories to support the redesigned quant agent suite
+(Momentum, Value, Event, Macro, Risk).
+
+Access matrix:
+  Data Type          Momentum  Value  Event  Macro  Risk
+  ----------------------------------------------------------------
+  price_action          Y        -      -      Y      Y
+  fundamentals          -        Y      -      -      Y
+  insider_trades        -        Y      -      -      Y
+  news                  -        -      Y      Y      Y
+  macro_indicators      -        -      -      Y      Y
+  options_flow          -        -      Y      -      Y
+  event_calendar        -        -      Y      -      Y
+  short_interest        Y        -      -      -      Y
+  ----------------------------------------------------------------
+
+Risk Agent has FULL ACCESS (deliberate asymmetry break).
+No two agents (except Risk) see the same data combination.
 """
 
 from __future__ import annotations
@@ -10,16 +25,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    # FinancialSnapshot is defined in backend/app/schemas/financial.py (plan 01-02).
-    # The TYPE_CHECKING guard prevents a hard import failure if that module is
-    # not yet available. At runtime we use Any-typed lists; mypy sees the full type.
     from app.schemas.financial import FinancialSnapshot
 
 # ---------------------------------------------------------------------------
-# Canonical data-type taxonomy
+# V1 data type taxonomy (kept for backward compat with persona agents)
 # ---------------------------------------------------------------------------
-# These string labels correspond to keys that will be present in a
-# FinancialSnapshot (or equivalent dict representation) produced by plan 01-02.
 
 DATA_TYPE_FUNDAMENTALS = "fundamentals"
 DATA_TYPE_PRICE_ACTION = "price_action"
@@ -27,10 +37,17 @@ DATA_TYPE_NEWS = "news"
 DATA_TYPE_INSIDER_TRADES = "insider_trades"
 
 # ---------------------------------------------------------------------------
-# Persona access control matrix
+# V2 extended data type taxonomy (8 categories)
 # ---------------------------------------------------------------------------
-# Maps persona name -> frozenset of allowed data types.
-# This is the single source of truth for information asymmetry.
+
+DATA_TYPE_MACRO_INDICATORS = "macro_indicators"
+DATA_TYPE_OPTIONS_FLOW = "options_flow"
+DATA_TYPE_EVENT_CALENDAR = "event_calendar"
+DATA_TYPE_SHORT_INTEREST = "short_interest"
+
+# ---------------------------------------------------------------------------
+# V1 Persona access control matrix (legacy — kept for committee.py compat)
+# ---------------------------------------------------------------------------
 
 PERSONA_DATA_ACCESS: dict[str, frozenset[str]] = {
     "buffett": frozenset({DATA_TYPE_FUNDAMENTALS}),
@@ -40,45 +57,74 @@ PERSONA_DATA_ACCESS: dict[str, frozenset[str]] = {
     "dalio": frozenset({DATA_TYPE_PRICE_ACTION, DATA_TYPE_NEWS}),
 }
 
+# ---------------------------------------------------------------------------
+# V2 Quant agent access control matrix
+# ---------------------------------------------------------------------------
+
+QUANT_AGENT_DATA_ACCESS: dict[str, frozenset[str]] = {
+    "momentum": frozenset({DATA_TYPE_PRICE_ACTION, DATA_TYPE_SHORT_INTEREST}),
+    "value": frozenset({DATA_TYPE_FUNDAMENTALS, DATA_TYPE_INSIDER_TRADES}),
+    "event": frozenset({DATA_TYPE_NEWS, DATA_TYPE_OPTIONS_FLOW, DATA_TYPE_EVENT_CALENDAR}),
+    "macro": frozenset({DATA_TYPE_MACRO_INDICATORS, DATA_TYPE_PRICE_ACTION, DATA_TYPE_NEWS}),
+    "risk": frozenset({  # Full access — deliberate asymmetry break
+        DATA_TYPE_PRICE_ACTION,
+        DATA_TYPE_FUNDAMENTALS,
+        DATA_TYPE_INSIDER_TRADES,
+        DATA_TYPE_NEWS,
+        DATA_TYPE_MACRO_INDICATORS,
+        DATA_TYPE_OPTIONS_FLOW,
+        DATA_TYPE_EVENT_CALENDAR,
+        DATA_TYPE_SHORT_INTEREST,
+    }),
+}
+
+# All recognised data type keys (V2)
+_ALL_DATA_TYPES_V2: frozenset[str] = frozenset({
+    DATA_TYPE_PRICE_ACTION,
+    DATA_TYPE_FUNDAMENTALS,
+    DATA_TYPE_INSIDER_TRADES,
+    DATA_TYPE_NEWS,
+    DATA_TYPE_MACRO_INDICATORS,
+    DATA_TYPE_OPTIONS_FLOW,
+    DATA_TYPE_EVENT_CALENDAR,
+    DATA_TYPE_SHORT_INTEREST,
+})
+
 
 class DataPartitioner:
-    """Filters a collection of financial snapshots to only the fields a given
-    persona is permitted to see.
+    """Filters a financial data context to only the fields a given agent may see.
 
-    This class is the enforcement layer for information asymmetry. It is called
-    immediately before persona rendering so that no restricted data ever reaches
-    an LLM prompt.
+    Supports both V1 persona names and V2 quant agent names.
 
-    Usage::
+    Usage (V2)::
 
         partitioner = DataPartitioner()
-        context = partitioner.partition_for_persona("buffett", snapshots)
-        # context contains only fundamentals — no price/news/insider data
+        context = partitioner.partition_for_quant_agent("momentum", full_data)
+        # context contains only price_action + short_interest
+
+    Usage (V1 legacy)::
+
+        context = partitioner.partition_raw("buffett", data)
     """
 
-    # All recognised top-level data keys in a snapshot dict.
-    _ALL_DATA_TYPES: frozenset[str] = frozenset(
-        {
-            DATA_TYPE_FUNDAMENTALS,
-            DATA_TYPE_PRICE_ACTION,
-            DATA_TYPE_NEWS,
-            DATA_TYPE_INSIDER_TRADES,
-        }
-    )
+    # All recognised top-level data keys (V1 — for backward compat)
+    _ALL_DATA_TYPES: frozenset[str] = frozenset({
+        DATA_TYPE_FUNDAMENTALS,
+        DATA_TYPE_PRICE_ACTION,
+        DATA_TYPE_NEWS,
+        DATA_TYPE_INSIDER_TRADES,
+    })
 
     def __init__(self) -> None:
-        self._access = PERSONA_DATA_ACCESS
+        self._access = PERSONA_DATA_ACCESS  # V1
+        self._quant_access = QUANT_AGENT_DATA_ACCESS  # V2
 
     # ------------------------------------------------------------------
-    # Public API
+    # V1 API (legacy — kept for backward compat)
     # ------------------------------------------------------------------
 
     def get_allowed_types(self, persona_name: str) -> frozenset[str]:
-        """Return the set of data types this persona may access.
-
-        Raises:
-            ValueError: if *persona_name* is not recognised.
-        """
+        """Return the set of data types a V1 persona may access."""
         name = persona_name.lower().strip()
         if name not in self._access:
             raise ValueError(
@@ -92,38 +138,20 @@ class DataPartitioner:
         persona_name: str,
         snapshots: list[Any],
     ) -> dict[str, Any]:
-        """Build a persona-specific data context from a list of snapshots.
-
-        Each snapshot is expected to be either a ``FinancialSnapshot`` instance
-        (with a ``model_dump()`` method, i.e. a Pydantic model) or a plain dict.
-        Keys not in the persona's allowed set are stripped before the context
-        dict is returned.
-
-        Args:
-            persona_name: One of ``{"buffett", "munger", "ackman", "cohen", "dalio"}``.
-            snapshots: List of ``FinancialSnapshot`` objects or equivalent dicts.
-
-        Returns:
-            A dict with only permitted data types, ready for JSON serialisation
-            and injection into a persona prompt via ``PersonaLoader.render_persona``.
-        """
+        """Build a V1 persona-specific data context from a list of snapshots."""
         allowed = self.get_allowed_types(persona_name)
         restricted = self._ALL_DATA_TYPES - allowed
 
         partitioned: list[dict[str, Any]] = []
         for snap in snapshots:
-            # Support both Pydantic models and plain dicts
             if hasattr(snap, "model_dump"):
                 snap_dict: dict[str, Any] = snap.model_dump()
-            elif hasattr(snap, "dict"):  # Pydantic v1 compat
+            elif hasattr(snap, "dict"):
                 snap_dict = snap.dict()
             else:
                 snap_dict = dict(snap)
 
-            # Remove restricted top-level keys
-            filtered = {
-                k: v for k, v in snap_dict.items() if k not in restricted
-            }
+            filtered = {k: v for k, v in snap_dict.items() if k not in restricted}
             partitioned.append(filtered)
 
         return {
@@ -137,18 +165,44 @@ class DataPartitioner:
         persona_name: str,
         data: dict[str, Any],
     ) -> dict[str, Any]:
-        """Partition a raw dict (not a snapshot list) for a persona.
-
-        Useful when callers have already assembled a flat data dict rather than
-        a list of FinancialSnapshot objects.
-
-        Args:
-            persona_name: Persona identifier.
-            data: Dict whose top-level keys are data-type labels.
-
-        Returns:
-            A filtered copy of *data* with restricted keys removed.
-        """
+        """Partition a raw dict for a V1 persona."""
         allowed = self.get_allowed_types(persona_name)
         restricted = self._ALL_DATA_TYPES - allowed
         return {k: v for k, v in data.items() if k not in restricted}
+
+    # ------------------------------------------------------------------
+    # V2 API (quant agents)
+    # ------------------------------------------------------------------
+
+    def get_allowed_types_v2(self, agent_id: str) -> frozenset[str]:
+        """Return the set of data types a V2 quant agent may access."""
+        name = agent_id.lower().strip()
+        if name not in self._quant_access:
+            raise ValueError(
+                f"Unknown quant agent '{name}'. "
+                f"Valid options: {sorted(self._quant_access.keys())}"
+            )
+        return self._quant_access[name]
+
+    def partition_for_quant_agent(
+        self,
+        agent_id: str,
+        data: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Partition a full data dict for a V2 quant agent.
+
+        Args:
+            agent_id: One of {"momentum", "value", "event", "macro", "risk"}.
+            data: Dict whose top-level keys are V2 data-type labels.
+
+        Returns:
+            Filtered copy of *data* with only permitted keys, plus metadata.
+        """
+        allowed = self.get_allowed_types_v2(agent_id)
+        restricted = _ALL_DATA_TYPES_V2 - allowed
+        filtered = {k: v for k, v in data.items() if k not in restricted}
+        return {
+            "agent_id": agent_id,
+            "allowed_data_types": sorted(allowed),
+            **filtered,
+        }

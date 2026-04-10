@@ -33,11 +33,14 @@ interface FeedItemProps {
 export const FeedItem = memo(function FeedItem({ item }: FeedItemProps) {
   const setSelectedOpportunity = usePipelineStore((s) => s.setSelectedOpportunity)
 
+  // Only decision items have a real opportunity_id in the DB
+  const isClickable = item.type === 'decision'
+
   return (
     <button
       type="button"
-      className="group w-full cursor-pointer text-left"
-      onClick={() => setSelectedOpportunity(item.id)}
+      className={`group w-full text-left ${isClickable ? 'cursor-pointer' : 'cursor-default'}`}
+      onClick={() => isClickable && setSelectedOpportunity(item.id)}
     >
       <div className="relative flex items-stretch overflow-hidden rounded-md border border-zinc-800 bg-zinc-900 transition-colors hover:border-zinc-700 hover:bg-zinc-800/60">
         {/* Left color bar */}

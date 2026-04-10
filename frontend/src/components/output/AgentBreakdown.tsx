@@ -7,11 +7,18 @@ const PERSONA_CONFIG: Record<
   string,
   { displayName: string; dotClass: string }
 > = {
+  // V2 quant agents
+  momentum: { displayName: 'Momentum',  dotClass: 'bg-blue-400' },
+  value:    { displayName: 'Value',     dotClass: 'bg-amber-400' },
+  event:    { displayName: 'Event',     dotClass: 'bg-violet-400' },
+  macro:    { displayName: 'Macro',     dotClass: 'bg-cyan-400' },
+  risk:     { displayName: 'Risk',      dotClass: 'bg-red-400' },
+  // V1 legacy (fallback)
   buffett: { displayName: 'Warren Buffett', dotClass: 'bg-amber-400' },
-  munger: { displayName: 'Charlie Munger', dotClass: 'bg-violet-400' },
-  ackman: { displayName: 'Bill Ackman', dotClass: 'bg-cyan-400' },
-  cohen: { displayName: 'Steve Cohen', dotClass: 'bg-pink-400' },
-  dalio: { displayName: 'Ray Dalio', dotClass: 'bg-sky-400' },
+  munger:  { displayName: 'Charlie Munger', dotClass: 'bg-violet-400' },
+  ackman:  { displayName: 'Bill Ackman',    dotClass: 'bg-cyan-400' },
+  cohen:   { displayName: 'Steve Cohen',    dotClass: 'bg-pink-400' },
+  dalio:   { displayName: 'Ray Dalio',      dotClass: 'bg-sky-400' },
 }
 
 function getPersonaConfig(persona: string) {
@@ -58,8 +65,10 @@ export const AgentBreakdown = memo(function AgentBreakdown({
   score,
 }: AgentBreakdownProps) {
   const { displayName, dotClass } = getPersonaConfig(score.persona)
-  const barWidth = Math.max(0, Math.min(100, score.confidence))
-  const barColor = confidenceBarClass(score.confidence)
+  // Normalise: V2 sends score 0-100, V1 sends confidence 0-1
+  const normalised = score.confidence <= 1 ? score.confidence * 100 : score.confidence
+  const barWidth = Math.max(0, Math.min(100, normalised))
+  const barColor = confidenceBarClass(normalised)
   const verdictColor = verdictTextClass(score.verdict)
 
   return (
@@ -85,7 +94,7 @@ export const AgentBreakdown = memo(function AgentBreakdown({
 
       {/* Score */}
       <span className="w-6 flex-shrink-0 text-right font-mono text-xs text-zinc-400">
-        {score.confidence}
+        {Math.round(normalised)}
       </span>
 
       {/* Verdict */}

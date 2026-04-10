@@ -20,7 +20,7 @@ from app.db.deps import get_session
 from app.db.models import (
     AgentVerdictRecord,
     CIODecisionRecord,
-    FundamentalSnapshot,
+    Fundamentals,
     NewsItem,
     PriceOHLCV,
 )
@@ -69,9 +69,9 @@ async def _build_context(ticker: str, opportunity_id: str | None, session: Async
     # Fundamentals
     try:
         fund_stmt = (
-            select(FundamentalSnapshot)
-            .where(FundamentalSnapshot.ticker == ticker.upper())
-            .order_by(desc(FundamentalSnapshot.snapshot_date))
+            select(Fundamentals)
+            .where(Fundamentals.ticker == ticker.upper())
+            .order_by(desc(Fundamentals.timestamp))
             .limit(1)
         )
         fund_row = (await session.execute(fund_stmt)).scalars().first()

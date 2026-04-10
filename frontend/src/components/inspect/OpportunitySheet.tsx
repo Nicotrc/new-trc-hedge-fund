@@ -50,14 +50,21 @@ function riskBadgeVariant(risk: string): 'success' | 'destructive' | 'warning' |
 // ─── Map raw verdict dict to AgentScore ─────────────────────────────────────
 
 function toAgentScore(raw: Record<string, unknown>): AgentScore {
+  // V2: agent_id, direction, score, confidence; V1: persona, verdict, confidence
+  const rawScore = Number(raw['score'] ?? raw['confidence'] ?? raw['confidence_score'] ?? 0)
+  const normalised = rawScore <= 1 ? rawScore * 100 : rawScore
+  const bullFactors = Array.isArray(raw['bull_factors']) ? (raw['bull_factors'] as string[]) : undefined
   return {
-    persona: (raw['persona'] as string | undefined) ?? 'Unknown',
-    verdict: (raw['verdict'] as string | undefined) ?? 'UNKNOWN',
-    confidence: Number(raw['confidence'] ?? raw['confidence_score'] ?? 0),
-    rationale: (raw['rationale'] as string | undefined) ?? (raw['reasoning'] as string | undefined),
-    risks: Array.isArray(raw['risks']) ? (raw['risks'] as string[]) : undefined,
+    persona: (raw['agent_id'] as string | undefined) ?? (raw['persona'] as string | undefined) ?? 'Unknown',
+    verdict: (raw['direction'] as string | undefined) ?? (raw['verdict'] as string | undefined) ?? 'UNKNOWN',
+    confidence: normalised,
+    rationale: bullFactors ? bullFactors.join(' · ') : (raw['rationale'] as string | undefined),
+    risks: Array.isArray(raw['bear_factors'])
+      ? (raw['bear_factors'] as string[])
+      : Array.isArray(raw['risks']) ? (raw['risks'] as string[]) : undefined,
     upsideScenario: (raw['upside_scenario'] as string | undefined),
-    timeHorizon: (raw['time_horizon'] as string | undefined),
+    timeHorizon: (raw['time_horizon_days'] as number | undefined)?.toString()
+      ?? (raw['time_horizon'] as string | undefined),
   }
 }
 
@@ -111,11 +118,18 @@ export function OpportunitySheet() {
   const rawId = selectedOpportunityId ?? ''
   const extractedTicker = rawId.includes(':') ? rawId.split(':', 1)[0] : rawId
   const ticker = (decision['ticker'] as string | undefined) ?? (extractedTicker || '—')
-  const finalVerdict = (decision['final_verdict'] as string | undefined) ?? '—'
-  const convictionScore = Number(decision['conviction_score'] ?? 0)
-  const allocationPct = Number(decision['suggested_allocation_pct'] ?? 0)
-  const riskRating = (decision['risk_rating'] as string | undefined) ?? 'UNKNOWN'
+  // Support both V2 (decision/weighted_score/position_size_pct) and V1 field names
+  const finalVerdict = (decision['decision'] as string | undefined)
+    ?? (decision['final_verdict'] as string | undefined) ?? '—'
+  const convictionScore = Number(decision['weighted_score'] ?? decision['conviction_score'] ?? 0)
+  const allocationPct = Number(decision['position_size_pct'] ?? decision['suggested_allocation_pct'] ?? 0)
+  const riskAgentScore = decision['risk_agent_score'] != null ? Number(decision['risk_agent_score']) : undefined
+  const riskRating = (decision['risk_rating'] as string | undefined)
+    ?? (riskAgentScore !== undefined ? (riskAgentScore >= 70 ? 'LOW' : riskAgentScore >= 40 ? 'MEDIUM' : 'HIGH') : 'UNKNOWN')
+  // V2: time horizon from Monte Carlo result
+  const mcResult = decision['monte_carlo'] as Record<string, unknown> | undefined
   const timeHorizon = (decision['time_horizon'] as string | undefined)
+    ?? (mcResult ? `${mcResult['time_horizon_days']}d` : undefined)
   const keyCatalysts = Array.isArray(decision['key_catalysts'])
     ? (decision['key_catalysts'] as string[])
     : undefined

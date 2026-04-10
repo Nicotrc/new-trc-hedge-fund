@@ -1,6 +1,7 @@
 import { PipelineGraph } from '@/components/graph/PipelineGraph'
 import { OpportunityFeed } from '@/components/feed/OpportunityFeed'
 import { OutputDashboard } from '@/components/output/OutputDashboard'
+import { ChatPanel } from '@/components/chat/ChatPanel'
 import { useSSEStore, type SSEStatus } from '@/hooks/usePipelineSSE'
 
 const STATUS_DISPLAY: Record<SSEStatus, { dot: string; text: string; label: string }> = {
@@ -52,6 +53,9 @@ export function DashboardLayout() {
           <OutputDashboard />
         </div>
       </div>
+
+      {/* Floating chat button */}
+      <ChatPanel />
     </div>
   )
 }
